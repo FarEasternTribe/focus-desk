@@ -149,8 +149,12 @@
   .tabs button[aria-selected="true"]{background:var(--surface); color:var(--ink); box-shadow:var(--shadow)}
 
   .logview{display:flex; flex-direction:column; gap:2px; max-height:300px; overflow-y:auto}
-  .logitem{padding:9px 2px; border-bottom:1px solid var(--line)}
+  .logitem{display:flex; align-items:flex-start; gap:8px; padding:9px 2px; border-bottom:1px solid var(--line)}
   .logitem:last-child{border-bottom:none}
+  .logitem .main{flex:1; min-width:0}
+  .logitem .acts{display:flex; gap:2px; flex-shrink:0}
+  .logitem .acts button{background:transparent; border:none; color:var(--muted); padding:4px 7px; font-size:.85rem; line-height:1; border-radius:6px; cursor:pointer}
+  .logitem .acts button:hover{background:var(--surface-2); color:var(--ink)}
   .logitem .ts{font-family:ui-monospace,monospace; font-size:.78rem; color:var(--muted); font-variant-numeric:tabular-nums}
   .logitem.session .ts{color:var(--good)}
   .logitem .bd{margin-top:3px; white-space:pre-wrap; word-break:break-word; font-size:.94rem}
@@ -188,6 +192,11 @@
   .modal-row .btn-ghost{padding:13px 15px}
   .modal-close{margin-top:2px}
   .modal-note{font-size:.78rem; color:var(--muted)}
+  .modal-card label{display:flex; flex-direction:column; gap:5px; font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700}
+  .modal-card input[type="time"], .modal-card input[type="text"], .modal-card textarea{font:inherit; font-size:1rem; text-transform:none; letter-spacing:normal; font-weight:400; color:var(--ink); background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; width:100%}
+  .modal-card textarea{resize:vertical; min-height:70px}
+  .modal-row2{display:flex; gap:10px}
+  .modal-row2 label{flex:1}
   .toast{position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(20px);
     background:var(--ink); color:var(--ground); padding:11px 18px; border-radius:12px; font-size:.9rem; font-weight:600;
     box-shadow:var(--shadow); opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; z-index:20; max-width:90vw; text-align:center}
@@ -330,7 +339,7 @@
   // ---------- storage ----------
   function loadSettings(){ try{const s=JSON.parse(localStorage.getItem(KEY_SET)); if(s)settings=Object.assign(settings,s);}catch(e){} }
   function saveSettings(){ localStorage.setItem(KEY_SET, JSON.stringify(settings)); }
-  function loadData(){ day=todayStr(); try{const d=JSON.parse(localStorage.getItem(KEY_DATA+day)); if(d&&d.entries)data=d; else data={date:day,entries:[]};}catch(e){data={date:day,entries:[]};} }
+  function loadData(){ day=todayStr(); try{const d=JSON.parse(localStorage.getItem(KEY_DATA+day)); if(d&&d.entries)data=d; else data={date:day,entries:[]};}catch(e){data={date:day,entries:[]};} data.entries.forEach(e=>{ if(!e.id)e.id=uid(); }); }
   function saveData(){ localStorage.setItem(KEY_DATA+data.date, JSON.stringify(data)); }
   function loadTimer(){ try{const t=JSON.parse(localStorage.getItem(KEY_TIMER)); if(t)timer=Object.assign(timer,t);}catch(e){} }
   function saveTimer(){ localStorage.setItem(KEY_TIMER, JSON.stringify(timer)); }
@@ -417,13 +426,18 @@
     if(!data.entries.length){ box.innerHTML='<div class="empty">今日の記録はまだありません。</div>'; return; }
     const sorted=[...data.entries].sort(byTime);
     box.innerHTML=sorted.map(e=>{
-      if(e.t==="memo") return `<div class="logitem"><div class="ts">${e.at}</div><div class="bd">${esc(e.text)}</div></div>`;
-      return `<div class="logitem session"><div class="ts">✓ ${e.start}–${e.end} · ${e.minutes}分</div><div class="bd">${esc(e.task||"（無題の集中）")}${e.intr?`　中断${e.intr}回`:""}</div></div>`;
+      const body = e.t==="memo"
+        ? `<div class="ts">${e.at}</div><div class="bd">${esc(e.text)}</div>`
+        : `<div class="ts">✓ ${e.start}–${e.end} · ${e.minutes}分</div><div class="bd">${esc(e.task||"（無題の集中）")}${e.intr?`　中断${e.intr}回`:""}</div>`;
+      return `<div class="logitem${e.t==="session"?" session":""}"><div class="main">${body}</div>`+
+        `<div class="acts"><button data-id="${e.id}" data-act="edit" title="編集" aria-label="編集">✎</button>`+
+        `<button data-id="${e.id}" data-act="del" title="削除" aria-label="削除">✕</button></div></div>`;
     }).join("");
   }
   function tkey(e){ return e.t==="memo"?e.at:e.start; }
   function byTime(a,b){ return tkey(a).localeCompare(tkey(b)); }
   function esc(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+  function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
   function buildMd(){
     const lines=["# "+data.date, ""];
@@ -469,7 +483,7 @@
     const endTs=timer.endTime||Date.now();
     if(wasFocus){
       const startHM=hhmm(timer.startTs||endTs-timer.duration*1000);
-      data.entries.push({t:"session", start:startHM, end:hhmm(endTs), minutes:Math.round(timer.duration/60), task:timer.task||"", intr:timer.intr||0});
+      data.entries.push({id:uid(), t:"session", start:startHM, end:hhmm(endTs), minutes:Math.round(timer.duration/60), task:timer.task||"", intr:timer.intr||0});
       saveData();
     }
     timer.running=false; timer.remainingWhenPaused=0;
@@ -504,7 +518,7 @@
   function record(){
     const t=$("memo").value.trim();
     if(!t){ $("memo").focus(); return; }
-    data.entries.push({t:"memo", at:hhmm(Date.now()), text:t});
+    data.entries.push({id:uid(), t:"memo", at:hhmm(Date.now()), text:t});
     saveData(); $("memo").value=""; render(); toast("記録しました");
     saveDraftNow();   // 記録後は下書きを空で保存し、再読込で消したメモが復活しないようにする
   }
@@ -576,7 +590,52 @@
     document.getElementById("obsClose").addEventListener("click",closeModal);
     wrap.addEventListener("click",e=>{ if(e.target===wrap) closeModal(); });
   }
-  function closeModal(){ const m=document.getElementById("obsModal"); if(m) m.remove(); }
+  function closeModal(){ document.querySelectorAll(".modal").forEach(m=>m.remove()); }
+
+  // ---------- edit / delete a log entry ----------
+  function toMin(hhmm){ const p=String(hhmm).split(":"); return (+p[0])*60+(+p[1]); }
+  function deleteEntry(entry){ if(confirm("この記録を削除しますか？")){ data.entries=data.entries.filter(x=>x.id!==entry.id); saveData(); render(); closeModal(); toast("削除しました"); } }
+  function openEditModal(entry){
+    closeModal();
+    const isMemo=entry.t==="memo";
+    const fields = isMemo
+      ? '<label>時刻<input type="time" id="edTime" value="'+entry.at+'"></label>'
+        +'<label>内容<textarea id="edText"></textarea></label>'
+      : '<label>作業名<input type="text" id="edTask"></label>'
+        +'<div class="modal-row2"><label>開始<input type="time" id="edStart" value="'+entry.start+'"></label>'
+        +'<label>終了<input type="time" id="edEnd" value="'+entry.end+'"></label></div>';
+    const wrap=document.createElement("div"); wrap.className="modal";
+    wrap.innerHTML=
+      '<div class="modal-card" role="dialog" aria-modal="true">'+
+        '<h2>'+(isMemo?'メモを編集':'集中セッションを編集')+'</h2>'+fields+
+        '<div class="modal-row">'+
+          '<button class="btn-primary" id="edSave">保存</button>'+
+          '<button class="btn-ghost" id="edCancel">キャンセル</button>'+
+        '</div>'+
+        '<button class="btn-ghost modal-close" id="edDelete">この記録を削除</button>'+
+      '</div>';
+    document.body.appendChild(wrap);
+    if(isMemo){ document.getElementById("edText").value=entry.text; }
+    else { document.getElementById("edTask").value=entry.task||""; }
+    document.getElementById("edSave").addEventListener("click",()=>saveEdit(entry,isMemo));
+    document.getElementById("edCancel").addEventListener("click",closeModal);
+    document.getElementById("edDelete").addEventListener("click",()=>deleteEntry(entry));
+    wrap.addEventListener("click",e=>{ if(e.target===wrap) closeModal(); });
+  }
+  function saveEdit(entry,isMemo){
+    if(isMemo){
+      const at=document.getElementById("edTime").value, text=document.getElementById("edText").value.trim();
+      if(!/^\d{1,2}:\d{2}$/.test(at)){ toast("時刻を入力してください"); return; }
+      if(!text){ toast("内容が空です"); return; }
+      entry.at=at; entry.text=text;
+    }else{
+      const task=document.getElementById("edTask").value.trim();
+      const s=document.getElementById("edStart").value, en=document.getElementById("edEnd").value;
+      if(!/^\d{1,2}:\d{2}$/.test(s)||!/^\d{1,2}:\d{2}$/.test(en)){ toast("開始・終了の時刻を入力してください"); return; }
+      entry.task=task; entry.start=s; entry.end=en; entry.minutes=Math.max(0, toMin(en)-toMin(s));
+    }
+    saveData(); render(); closeModal(); toast("更新しました");  // render()内で時刻順に再ソート
+  }
   function clearDay(){ if(!confirm(data.date+" の記録をこの端末から消去しますか？")) return; data={date:todayStr(),entries:[]}; saveData(); render(); toast("消去しました"); }
 
   // ---------- voice ----------
@@ -627,6 +686,11 @@
     $("memo").addEventListener("keydown",e=>{
       // Enter=記録／Shift+Enter=改行。日本語IMEの変換確定Enterは無視(isComposing / keyCode 229)
       if(e.key==="Enter" && !e.shiftKey && !e.isComposing && e.keyCode!==229){ e.preventDefault(); record(); }
+    });
+    $("logView").addEventListener("click",e=>{
+      const b=e.target.closest("button[data-act]"); if(!b) return;
+      const entry=data.entries.find(x=>x.id===b.dataset.id); if(!entry) return;
+      if(b.dataset.act==="del") deleteEntry(entry); else openEditModal(entry);
     });
     $("memo").addEventListener("input",scheduleDraftSave);
     $("taskName").addEventListener("input",()=>{ if(!timer.running){ timer.task=$("taskName").value; } scheduleDraftSave(); });
