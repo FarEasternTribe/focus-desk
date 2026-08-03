@@ -1,0 +1,656 @@
+﻿<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="集中デスク">
+<meta name="theme-color" content="#F4F5F9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14161E" media="(prefers-color-scheme: dark)">
+<title>集中デスク — Focus & Capture</title>
+</head>
+<body>
+<style>
+  :root{
+    --ground:#F4F5F9; --surface:#FFFFFF; --surface-2:#EEF0F6;
+    --ink:#191B24; --ink-soft:#454A5A; --muted:#6B6F7E; --line:#E1E4EC;
+    --focus:#F0821E; --focus-ink:#B25E12;
+    --good:#3C9A6D; --break:#3E7CC4;
+    --ring-track:#E4E7EF;
+    --shadow:0 1px 2px rgba(20,22,30,.06),0 8px 24px rgba(20,22,30,.06);
+    --radius:18px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#14161E; --surface:#1D2029; --surface-2:#242833;
+      --ink:#ECEDF2; --ink-soft:#C3C7D2; --muted:#8A8FA0; --line:#2C303C;
+      --focus:#F5952E; --focus-ink:#F5B268;
+      --good:#4FB985; --break:#5E9BE0;
+      --ring-track:#2C313E;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#F4F5F9; --surface:#FFFFFF; --surface-2:#EEF0F6;
+    --ink:#191B24; --ink-soft:#454A5A; --muted:#6B6F7E; --line:#E1E4EC;
+    --focus:#F0821E; --focus-ink:#B25E12; --good:#3C9A6D; --break:#3E7CC4;
+    --ring-track:#E4E7EF; --shadow:0 1px 2px rgba(20,22,30,.06),0 8px 24px rgba(20,22,30,.06);
+  }
+  :root[data-theme="dark"]{
+    --ground:#14161E; --surface:#1D2029; --surface-2:#242833;
+    --ink:#ECEDF2; --ink-soft:#C3C7D2; --muted:#8A8FA0; --line:#2C303C;
+    --focus:#F5952E; --focus-ink:#F5B268; --good:#4FB985; --break:#5E9BE0;
+    --ring-track:#2C313E; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0}
+  .app{
+    font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+    background:var(--ground); color:var(--ink);
+    min-height:100vh; -webkit-font-smoothing:antialiased;
+    padding:max(14px,env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom));
+    line-height:1.5;
+  }
+  .wrap{max-width:1040px; margin:0 auto; display:flex; flex-direction:column; gap:14px}
+  header.top{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding:2px 4px}
+  .brand{display:flex; flex-direction:column; gap:2px}
+  .brand h1{margin:0; font-size:1.18rem; letter-spacing:-.01em; font-weight:700}
+  .brand .sub{font-size:.72rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted)}
+  .todaystat{display:flex; gap:14px; text-align:right}
+  .todaystat .n{font-size:1.35rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1}
+  .todaystat .l{font-size:.66rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-top:3px}
+
+  .grid{display:grid; grid-template-columns:1fr; gap:14px}
+  @media (min-width:840px){ .grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:start} }
+
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:18px}
+  .card.timer{position:relative; overflow:hidden}
+
+  .modechip{display:inline-flex; align-items:center; gap:7px; font-size:.72rem; font-weight:600;
+    text-transform:uppercase; letter-spacing:.1em; padding:5px 11px; border-radius:999px;
+    background:color-mix(in srgb,var(--focus) 15%,transparent); color:var(--focus-ink)}
+  .modechip.break{background:color-mix(in srgb,var(--break) 16%,transparent); color:var(--break)}
+  .modechip .dot{width:7px; height:7px; border-radius:50%; background:currentColor}
+
+  .taskrow{margin-top:14px}
+  .taskrow label{display:block; font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-bottom:5px}
+  .taskrow input{width:100%; font:inherit; font-size:1rem; color:var(--ink); background:var(--surface-2);
+    border:1px solid var(--line); border-radius:12px; padding:11px 13px}
+  .taskrow input::placeholder{color:var(--muted)}
+
+  .dial{display:flex; flex-direction:column; align-items:center; margin:16px 0 6px}
+  .ringbox{position:relative; width:230px; max-width:64vw; aspect-ratio:1}
+  .ringbox svg{width:100%; height:100%; transform:rotate(-90deg)}
+  .ringbox .track{fill:none; stroke:var(--ring-track); stroke-width:9}
+  .ringbox .prog{fill:none; stroke:var(--focus); stroke-width:9; stroke-linecap:round;
+    transition:stroke-dashoffset .3s linear, stroke .3s}
+  .ringbox.break .prog{stroke:var(--break)}
+  .ringcenter{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px}
+  .time{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace; font-size:3.2rem; font-weight:600;
+    font-variant-numeric:tabular-nums; letter-spacing:.01em; line-height:1}
+  @media (max-width:380px){ .time{font-size:2.7rem} }
+  .time.warn{color:var(--focus)}
+  .undertime{font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.08em}
+
+  .controls{display:flex; gap:10px; margin-top:8px}
+  button{font:inherit; cursor:pointer; border:none; border-radius:13px; transition:transform .05s, filter .15s, background .15s, border-color .15s}
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:2.5px solid var(--focus); outline-offset:2px}
+  .btn-primary{flex:1; background:var(--focus); color:#fff; font-weight:700; font-size:1.02rem; padding:14px}
+  .btn-primary.break{background:var(--break)}
+  .btn-primary:hover{filter:brightness(1.04)}
+  .btn-ghost{background:var(--surface-2); color:var(--ink-soft); font-weight:600; padding:14px 16px; border:1px solid var(--line)}
+  .btn-ghost:hover{border-color:var(--muted)}
+
+  .presets{display:flex; flex-wrap:wrap; gap:12px 18px; margin-top:16px; padding-top:14px; border-top:1px solid var(--line)}
+  .preset-group{display:flex; flex-direction:column; gap:6px}
+  .preset-group .cap{font-size:.66rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted)}
+  .chips{display:flex; gap:6px}
+  .chip{background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--line); border-radius:10px;
+    padding:7px 12px; font-size:.9rem; font-weight:600; font-variant-numeric:tabular-nums}
+  .chip[aria-pressed="true"]{background:color-mix(in srgb,var(--focus) 16%,transparent); color:var(--focus-ink); border-color:transparent}
+  .preset-group.brk .chip[aria-pressed="true"]{background:color-mix(in srgb,var(--break) 18%,transparent); color:var(--break)}
+
+  .sessions{margin-top:14px; padding-top:12px; border-top:1px solid var(--line)}
+  .sessions h3{margin:0 0 8px; font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); font-weight:700}
+  .slist{display:flex; flex-direction:column; gap:6px; max-height:150px; overflow-y:auto}
+  .srow{display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:baseline; font-size:.86rem}
+  .srow .tm{font-variant-numeric:tabular-nums; color:var(--muted); font-family:ui-monospace,monospace; font-size:.8rem}
+  .srow .tk{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .srow .mn{font-weight:700; color:var(--good); font-variant-numeric:tabular-nums}
+  .srow .intr{font-size:.72rem; color:var(--focus-ink)}
+  .empty{color:var(--muted); font-size:.85rem}
+
+  /* memo */
+  .memohead{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px}
+  .memohead h2{margin:0; font-size:1rem; font-weight:700}
+  .memohead .hint{font-size:.72rem; color:var(--muted)}
+  .memohead .savestate{font-size:.72rem; font-weight:600; color:var(--muted); white-space:nowrap; transition:color .2s}
+  .savestate.saving{color:var(--focus-ink)}
+  .savestate.saved{color:var(--good)}
+  .savestate.error{color:#d5492f}
+  textarea#memo{width:100%; min-height:120px; resize:vertical; font:inherit; font-size:1rem; color:var(--ink);
+    background:var(--surface-2); border:1px solid var(--line); border-radius:13px; padding:13px 14px}
+  textarea#memo::placeholder{color:var(--muted)}
+  .memoctrls{display:flex; gap:10px; margin-top:10px}
+  .btn-mic{background:var(--surface-2); border:1px solid var(--line); color:var(--ink-soft); padding:13px 15px; font-size:1.1rem; line-height:1}
+  .btn-mic.rec{background:color-mix(in srgb,var(--focus) 18%,transparent); color:var(--focus-ink); border-color:transparent}
+  .btn-rec{flex:1; background:var(--ink); color:var(--ground); font-weight:700; font-size:1rem; padding:13px}
+  :root[data-theme="dark"] .btn-rec, :root:not([data-theme="light"]) .btn-rec{}
+  @media (prefers-color-scheme:dark){ .btn-rec{background:var(--focus); color:#1a1200} }
+  :root[data-theme="dark"] .btn-rec{background:var(--focus); color:#1a1200}
+  :root[data-theme="light"] .btn-rec{background:var(--ink); color:#fff}
+
+  .tabs{display:flex; gap:4px; margin:16px 0 10px; background:var(--surface-2); border:1px solid var(--line); border-radius:11px; padding:4px}
+  .tabs button{flex:1; background:transparent; color:var(--muted); font-weight:600; font-size:.86rem; padding:8px; border-radius:8px}
+  .tabs button[aria-selected="true"]{background:var(--surface); color:var(--ink); box-shadow:var(--shadow)}
+
+  .logview{display:flex; flex-direction:column; gap:2px; max-height:300px; overflow-y:auto}
+  .logitem{padding:9px 2px; border-bottom:1px solid var(--line)}
+  .logitem:last-child{border-bottom:none}
+  .logitem .ts{font-family:ui-monospace,monospace; font-size:.78rem; color:var(--muted); font-variant-numeric:tabular-nums}
+  .logitem.session .ts{color:var(--good)}
+  .logitem .bd{margin-top:3px; white-space:pre-wrap; word-break:break-word; font-size:.94rem}
+  .logitem.session .bd{color:var(--ink-soft); font-size:.88rem}
+  pre#md{margin:0; max-height:300px; overflow:auto; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:12px; padding:13px; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.8rem; white-space:pre; color:var(--ink-soft)}
+
+  .exports{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px}
+  .exports .btn-ghost{padding:12px; font-size:.9rem; text-align:center}
+  .exports .wide{grid-column:1 / -1; background:color-mix(in srgb,var(--break) 14%,transparent); color:var(--break); border-color:transparent; font-weight:700}
+
+  .vaultrow{display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; margin-top:10px; font-size:.78rem; color:var(--muted)}
+  .vaultrow label{white-space:nowrap}
+  .vaultrow input{flex:1 1 110px; min-width:90px; font:inherit; font-size:.85rem; color:var(--ink); background:var(--surface-2); border:1px solid var(--line); border-radius:9px; padding:8px 10px}
+  .vaulthint{margin-top:6px; font-size:.74rem; color:var(--muted); font-family:ui-monospace,monospace; word-break:break-all}
+
+  /* completion overlay */
+  .done{position:absolute; inset:0; background:color-mix(in srgb,var(--surface) 92%,var(--focus)); backdrop-filter:blur(2px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; text-align:center; padding:24px; z-index:5}
+  .done .big{font-size:2.6rem}
+  .done h2{margin:0; font-size:1.3rem}
+  .done p{margin:0; color:var(--ink-soft)}
+  .done .row{display:flex; gap:10px; margin-top:6px}
+  .pulse{animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+  .hidden{display:none !important}
+
+  .modal{position:fixed; inset:0; background:rgba(10,12,18,.5); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; padding:20px; z-index:40}
+  .modal-card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:22px; max-width:430px; width:100%; display:flex; flex-direction:column; gap:11px}
+  .modal-card h2{margin:0; font-size:1.15rem}
+  .modal-card p{margin:0; color:var(--ink-soft); font-size:.92rem; line-height:1.55}
+  .modal-card code{background:var(--surface-2); padding:1px 6px; border-radius:5px; font-family:ui-monospace,monospace; font-size:.85em}
+  .modal-row{display:flex; gap:10px; margin-top:4px}
+  .modal-row .btn-primary{flex:1; text-align:center; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; padding:13px}
+  .modal-row .btn-ghost{padding:13px 15px}
+  .modal-close{margin-top:2px}
+  .modal-note{font-size:.78rem; color:var(--muted)}
+  .toast{position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:var(--ground); padding:11px 18px; border-radius:12px; font-size:.9rem; font-weight:600;
+    box-shadow:var(--shadow); opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; z-index:20; max-width:90vw; text-align:center}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  .foot{text-align:center; color:var(--muted); font-size:.72rem; padding:4px 0 2px}
+  @media (prefers-reduced-motion:reduce){ *{animation:none !important; transition:none !important} }
+</style>
+
+<div class="app">
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">
+        <h1>集中デスク</h1>
+        <span class="sub">Focus &amp; Capture</span>
+      </div>
+      <div class="todaystat">
+        <div><div class="n" id="statCount">0</div><div class="l">今日の集中</div></div>
+        <div><div class="n" id="statMin">0</div><div class="l">合計 分</div></div>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- TIMER -->
+      <section class="card timer">
+        <span class="modechip" id="modeChip"><span class="dot"></span><span id="modeLabel">集中</span></span>
+
+        <div class="taskrow">
+          <label for="taskName">作業名（任意）</label>
+          <input id="taskName" type="text" placeholder="例：論文図の整理" autocomplete="off" />
+        </div>
+
+        <div class="dial">
+          <div class="ringbox" id="ringBox">
+            <svg viewBox="0 0 100 100">
+              <circle class="track" cx="50" cy="50" r="45"></circle>
+              <circle class="prog" id="ringProg" cx="50" cy="50" r="45"></circle>
+            </svg>
+            <div class="ringcenter">
+              <div class="time" id="timeText">25:00</div>
+              <div class="undertime" id="underText">集中の準備</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="btn-primary" id="startBtn">開始</button>
+          <button class="btn-ghost" id="stopBtn">終了</button>
+        </div>
+
+        <div class="presets">
+          <div class="preset-group">
+            <span class="cap">集中（分）</span>
+            <div class="chips" id="focusChips">
+              <button class="chip" data-min="15">15</button>
+              <button class="chip" data-min="25" aria-pressed="true">25</button>
+              <button class="chip" data-min="45">45</button>
+            </div>
+          </div>
+          <div class="preset-group brk">
+            <span class="cap">休憩（分）</span>
+            <div class="chips" id="breakChips">
+              <button class="chip" data-min="5" aria-pressed="true">5</button>
+              <button class="chip" data-min="10">10</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sessions">
+          <h3>今日のセッション</h3>
+          <div class="slist" id="sessionList"><div class="empty">まだありません。</div></div>
+        </div>
+
+        <div class="done hidden" id="doneOverlay">
+          <div class="big pulse" id="doneEmoji">✅</div>
+          <h2 id="doneTitle">集中 完了！</h2>
+          <p id="doneMsg">お疲れさまでした。</p>
+          <div class="row">
+            <button class="btn-primary break" id="doneNext">休憩を開始</button>
+            <button class="btn-ghost" id="doneClose">閉じる</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- MEMO -->
+      <section class="card memo">
+        <div class="memohead">
+          <h2>即時メモ</h2>
+          <span class="savestate" id="saveState"></span>
+        </div>
+        <textarea id="memo" rows="2" placeholder="思いついたことを一言。Enterで記録・Shift+Enterで改行。入力は自動保存されます。"></textarea>
+        <div class="memoctrls">
+          <button class="btn-mic" id="micBtn" title="音声入力" aria-label="音声入力">🎤</button>
+          <button class="btn-rec" id="recBtn">記録</button>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" id="tabLog">履歴</button>
+          <button role="tab" aria-selected="false" id="tabMd">Markdown</button>
+        </div>
+        <div id="logView" class="logview"><div class="empty">今日の記録はまだありません。</div></div>
+        <pre id="md" class="hidden"></pre>
+
+        <div class="exports">
+          <button class="btn-ghost" id="copyBtn">コピー</button>
+          <button class="btn-ghost" id="dlBtn">.md 保存</button>
+          <button class="btn-ghost" id="shareBtn">共有…</button>
+          <button class="btn-ghost" id="clearBtn">今日を消去</button>
+          <button class="btn-ghost wide" id="obsBtn">Obsidianに書き出し（今日のノートを更新）</button>
+        </div>
+        <div class="vaultrow">
+          <label for="vaultName">Vault</label>
+          <input id="vaultName" type="text" placeholder="外部脳" autocomplete="off" />
+          <label for="folderName">フォルダ</label>
+          <input id="folderName" type="text" placeholder="集中ログ" autocomplete="off" />
+        </div>
+        <div class="vaulthint" id="vaultHint">→ 外部脳/集中ログ/2026-08-01.md</div>
+      </section>
+    </div>
+    <div class="foot">ローカル保存（この端末のブラウザ内）。通知は前面表示時に音＋バナーで確実に鳴ります。</div>
+  </div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $=id=>document.getElementById(id);
+  const pad=n=>String(n).padStart(2,"0");
+  const todayStr=()=>{const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());};
+  const hhmm=ts=>{const d=new Date(ts);return pad(d.getHours())+":"+pad(d.getMinutes());};
+  const KEY_DATA="focusdesk:v1:", KEY_SET="focusdesk:settings", KEY_TIMER="focusdesk:timer", KEY_DRAFT="focusdesk:draft";
+
+  let settings={focus:25,break:5,vault:"外部脳",folder:"集中ログ"};
+  let day=todayStr();
+  let data={date:day, entries:[]};              // entries: {t:'memo',at,text} | {t:'session',start,end,minutes,task,intr}
+  let timer={mode:"focus", running:false, endTime:0, duration:25*60, task:"", startTs:0, intr:0, remainingWhenPaused:0};
+  let audioCtx=null, tickHandle=null;
+  let db=null, draftSaveTimer=null;
+
+  // ---------- storage ----------
+  function loadSettings(){ try{const s=JSON.parse(localStorage.getItem(KEY_SET)); if(s)settings=Object.assign(settings,s);}catch(e){} }
+  function saveSettings(){ localStorage.setItem(KEY_SET, JSON.stringify(settings)); }
+  function loadData(){ day=todayStr(); try{const d=JSON.parse(localStorage.getItem(KEY_DATA+day)); if(d&&d.entries)data=d; else data={date:day,entries:[]};}catch(e){data={date:day,entries:[]};} }
+  function saveData(){ localStorage.setItem(KEY_DATA+data.date, JSON.stringify(data)); }
+  function loadTimer(){ try{const t=JSON.parse(localStorage.getItem(KEY_TIMER)); if(t)timer=Object.assign(timer,t);}catch(e){} }
+  function saveTimer(){ localStorage.setItem(KEY_TIMER, JSON.stringify(timer)); }
+
+  // ---------- draft auto-save: IndexedDB (500ms debounce) + localStorage mirror ----------
+  const DB_NAME="focusdesk", DB_STORE="kv";
+  function idbOpen(){ return new Promise((res,rej)=>{ if(!("indexedDB"in window)){rej();return;} let r; try{ r=indexedDB.open(DB_NAME,1); }catch(e){ rej(); return; } r.onupgradeneeded=()=>{ try{ r.result.createObjectStore(DB_STORE); }catch(e){} }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(); r.onblocked=()=>rej(); }); }
+  function idbSet(key,val){ return new Promise((res,rej)=>{ try{ const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).put(val,key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(); }catch(e){ rej(); } }); }
+  function idbGet(key){ return new Promise((res)=>{ try{ const tx=db.transaction(DB_STORE,"readonly"); const g=tx.objectStore(DB_STORE).get(key); g.onsuccess=()=>res(g.result); g.onerror=()=>res(null); }catch(e){ res(null); } }); }
+  function draftObj(){ return {date:todayStr(), memo:$("memo").value, task:$("taskName").value, at:Date.now()}; }
+  function saveDraftNow(){
+    const d=draftObj();
+    try{ localStorage.setItem(KEY_DRAFT, JSON.stringify(d)); }catch(e){}   // 同期ミラー：pagehide時も確実
+    if(db){ idbSet("draft",d).then(()=>setSaveState(d.memo?"saved":"idle")).catch(()=>setSaveState(d.memo?"saved":"idle")); }
+    else setSaveState(d.memo?"saved":"idle");
+  }
+  function scheduleDraftSave(){ setSaveState("saving"); clearTimeout(draftSaveTimer); draftSaveTimer=setTimeout(saveDraftNow,500); }
+  function flushDraft(){ clearTimeout(draftSaveTimer); saveDraftNow(); }
+  function clearDraftStore(){ try{ localStorage.removeItem(KEY_DRAFT); }catch(e){} if(db){ idbSet("draft",null).catch(()=>{}); } }
+  async function loadDraft(){ let d=null; if(db){ d=await idbGet("draft"); } if(!d){ try{ d=JSON.parse(localStorage.getItem(KEY_DRAFT)||"null"); }catch(e){} } return d; }
+  async function restoreDraft(){
+    const d=await loadDraft();
+    if(!d || d.date!==todayStr()){ setSaveState("idle"); return; }
+    let restored=false;
+    if(d.memo && !$("memo").value){ $("memo").value=d.memo; restored=true; }
+    if(d.task && !$("taskName").value && !timer.running){ $("taskName").value=d.task; timer.task=d.task; }
+    setSaveState(d.memo?"saved":"idle");
+    if(restored) toast("入力途中のメモを復元しました");
+  }
+  function setSaveState(s){
+    const el=$("saveState"); if(!el) return;
+    el.textContent = s==="saving"?"● 保存中…" : s==="saved"?"✓ 保存済み" : s==="error"?"⚠ 保存できません" : "";
+    el.className = "savestate"+((s&&s!=="idle")?(" "+s):"");
+  }
+
+  // ---------- audio + notify ----------
+  function ensureAudio(){ if(!audioCtx){ try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){} } if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume(); }
+  function chime(){ if(!audioCtx)return; const now=audioCtx.currentTime; const notes=[660,880,990]; notes.forEach((f,i)=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type="sine";o.frequency.value=f;const t0=now+i*0.18;o.connect(g);g.connect(audioCtx.destination);g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(0.25,t0+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t0+0.5);o.start(t0);o.stop(t0+0.55);}); }
+  function notify(title,body){ try{ if("Notification"in window&&Notification.permission==="granted"){ new Notification(title,{body:body}); } }catch(e){} }
+  function askNotify(){ try{ if("Notification"in window&&Notification.permission==="default"){ Notification.requestPermission(); } }catch(e){} }
+
+  // ---------- toast ----------
+  let toastT=null;
+  function toast(msg){ const el=$("toast"); el.textContent=msg; el.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2200); }
+
+  // ---------- rendering ----------
+  const CIRC=2*Math.PI*45;
+  function render(){
+    // mode
+    const isBreak=timer.mode==="break";
+    $("modeLabel").textContent=isBreak?"休憩":"集中";
+    $("modeChip").classList.toggle("break",isBreak);
+    $("ringBox").classList.toggle("break",isBreak);
+    // time + ring
+    const rem=currentRemaining();
+    const total=timer.duration||1;
+    $("timeText").textContent=fmt(rem);
+    $("timeText").classList.toggle("warn", timer.running&&rem<=10);
+    const frac=Math.max(0,Math.min(1,rem/total));
+    $("ringProg").style.strokeDasharray=CIRC;
+    $("ringProg").style.strokeDashoffset=CIRC*(1-frac);
+    // under text + button
+    $("underText").textContent= timer.running ? (isBreak?"休憩中":"集中中") : (rem<total?"一時停止中":(isBreak?"休憩の準備":"集中の準備"));
+    $("startBtn").textContent= timer.running ? "一時停止" : (rem<total&&rem>0 ? "再開" : "開始");
+    $("startBtn").classList.toggle("break",isBreak);
+    document.title=(timer.running?fmt(rem)+" · ":"")+"集中デスク";
+    renderStats(); renderSessions(); renderLog(); renderMd();
+    $("taskName").value=timer.task||$("taskName").value;
+  }
+  function fmt(s){ s=Math.max(0,Math.round(s)); return pad(Math.floor(s/60))+":"+pad(s%60); }
+  function renderStats(){
+    const fs=data.entries.filter(e=>e.t==="session");
+    $("statCount").textContent=fs.length;
+    $("statMin").textContent=fs.reduce((a,e)=>a+e.minutes,0);
+  }
+  function renderSessions(){
+    const fs=data.entries.filter(e=>e.t==="session");
+    const box=$("sessionList");
+    if(!fs.length){ box.innerHTML='<div class="empty">まだありません。</div>'; return; }
+    box.innerHTML=fs.map(e=>`<div class="srow"><span class="tm">${e.start}–${e.end}</span><span class="tk">${esc(e.task||"（無題）")}</span><span class="mn">${e.minutes}分${e.intr?` <span class="intr">中断${e.intr}</span>`:""}</span></div>`).join("");
+  }
+  function renderLog(){
+    const box=$("logView");
+    if(!data.entries.length){ box.innerHTML='<div class="empty">今日の記録はまだありません。</div>'; return; }
+    const sorted=[...data.entries].sort(byTime);
+    box.innerHTML=sorted.map(e=>{
+      if(e.t==="memo") return `<div class="logitem"><div class="ts">${e.at}</div><div class="bd">${esc(e.text)}</div></div>`;
+      return `<div class="logitem session"><div class="ts">✓ ${e.start}–${e.end} · ${e.minutes}分</div><div class="bd">${esc(e.task||"（無題の集中）")}${e.intr?`　中断${e.intr}回`:""}</div></div>`;
+    }).join("");
+  }
+  function tkey(e){ return e.t==="memo"?e.at:e.start; }
+  function byTime(a,b){ return tkey(a).localeCompare(tkey(b)); }
+  function esc(s){ return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+  function buildMd(){
+    const lines=["# "+data.date, ""];
+    const sorted=[...data.entries].sort(byTime);
+    for(const e of sorted){
+      if(e.t==="memo"){
+        lines.push(e.at+"　"+e.text.trim().replace(/\s*\n+\s*/g," "));  // 時間　内容 を1行で
+      }else{
+        lines.push(e.start+"–"+e.end+"　✓集中 "+e.minutes+"分"+(e.task?"："+e.task:"")+(e.intr?"（中断"+e.intr+"）":""));
+      }
+    }
+    return lines.join("\n")+"\n";
+  }
+  function renderMd(){ $("md").textContent=buildMd(); }
+
+  // ---------- timer core ----------
+  function currentRemaining(){ if(timer.running){ return Math.max(0,(timer.endTime-Date.now())/1000); } return timer.remainingWhenPaused>0?timer.remainingWhenPaused:timer.duration; }
+  function startTick(){ stopTick(); tickHandle=setInterval(()=>{ if(!timer.running)return; const rem=(timer.endTime-Date.now())/1000; if(rem<=0){ complete(); } else { render(); } },250); }
+  function stopTick(){ if(tickHandle){clearInterval(tickHandle);tickHandle=null;} }
+
+  function startOrPause(){
+    ensureAudio(); askNotify();
+    if(timer.running){ // -> pause
+      timer.remainingWhenPaused=Math.max(0,(timer.endTime-Date.now())/1000);
+      timer.running=false;
+      if(timer.mode==="focus") timer.intr++;
+      saveTimer(); render(); stopTick(); toast("一時停止（中断 "+timer.intr+"）");
+      return;
+    }
+    // -> start / resume
+    const resuming=timer.remainingWhenPaused>0 && timer.remainingWhenPaused<timer.duration;
+    const rem= resuming ? timer.remainingWhenPaused : timer.duration;
+    if(!resuming){ timer.task=$("taskName").value.trim(); timer.startTs=Date.now(); timer.intr=0; }
+    timer.endTime=Date.now()+rem*1000;
+    timer.remainingWhenPaused=0;
+    timer.running=true;
+    saveTimer(); render(); startTick();
+  }
+
+  function complete(){
+    stopTick();
+    const wasFocus=timer.mode==="focus";
+    const endTs=timer.endTime||Date.now();
+    if(wasFocus){
+      const startHM=hhmm(timer.startTs||endTs-timer.duration*1000);
+      data.entries.push({t:"session", start:startHM, end:hhmm(endTs), minutes:Math.round(timer.duration/60), task:timer.task||"", intr:timer.intr||0});
+      saveData();
+    }
+    timer.running=false; timer.remainingWhenPaused=0;
+    chime();
+    notify(wasFocus?"集中 完了！":"休憩 終了", wasFocus?(timer.duration/60+"分の集中お疲れさまでした。"):"次の集中を始めましょう。");
+    showDone(wasFocus);
+    saveTimer(); render();
+  }
+
+  function stopReset(){
+    stopTick();
+    // if a focus was running/paused partway, do NOT count it (only completed sessions count)
+    timer.running=false; timer.remainingWhenPaused=0; timer.intr=0;
+    timer.mode="focus"; timer.duration=settings.focus*60; timer.endTime=0; timer.startTs=0;
+    hideDone(); saveTimer(); render();
+  }
+
+  function setMode(mode){ timer.mode=mode; timer.duration=(mode==="focus"?settings.focus:settings.break)*60; timer.remainingWhenPaused=0; timer.endTime=0; timer.running=false; }
+
+  // ---------- completion overlay ----------
+  function showDone(wasFocus){
+    $("doneEmoji").textContent=wasFocus?"✅":"☕";
+    $("doneTitle").textContent=wasFocus?"集中 完了！":"休憩 終了";
+    $("doneMsg").textContent=wasFocus?(Math.round(timer.duration/60)+"分 お疲れさまでした。休憩しましょう。"):"次の集中を始めましょう。";
+    $("doneNext").textContent=wasFocus?"休憩を開始":"集中を開始";
+    $("doneOverlay").classList.remove("hidden");
+  }
+  function hideDone(){ $("doneOverlay").classList.add("hidden"); }
+  function doneNext(){ const wasFocus=$("doneEmoji").textContent==="✅"; hideDone(); setMode(wasFocus?"break":"focus"); saveTimer(); render(); startOrPause(); }
+
+  // ---------- memo ----------
+  function record(){
+    const t=$("memo").value.trim();
+    if(!t){ $("memo").focus(); return; }
+    data.entries.push({t:"memo", at:hhmm(Date.now()), text:t});
+    saveData(); $("memo").value=""; render(); toast("記録しました");
+    saveDraftNow();   // 記録後は下書きを空で保存し、再読込で消したメモが復活しないようにする
+  }
+
+  // ---------- exports ----------
+  async function copyToClipboard(text, okMsg){
+    try{ await navigator.clipboard.writeText(text); toast(okMsg||"コピーしました"); return true; }
+    catch(e){
+      const ta=document.createElement("textarea"); ta.value=text; ta.style.position="fixed"; ta.style.top="-1000px"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      let ok=false; try{ ok=document.execCommand("copy"); }catch(_){}
+      document.body.removeChild(ta); toast(ok?(okMsg||"コピーしました"):"コピーできませんでした"); return ok;
+    }
+  }
+  function copyMd(){ return copyToClipboard(buildMd(),"Markdownをコピーしました"); }
+  function download(){ const md=buildMd(); const blob=new Blob([md],{type:"text/markdown"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=data.date+".md"; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(()=>URL.revokeObjectURL(url),1500); toast("保存しました"); }
+  async function share(){ const md=buildMd(); if(navigator.share){ try{ await navigator.share({title:data.date, text:md}); }catch(e){} } else { copyMd(); toast("共有非対応のためコピーしました"); } }
+  function isEmbedded(){ try{ return window.self!==window.top; }catch(e){ return true; } }
+  function obsidianFilePath(){
+    const folder=(settings.folder||"").replace(/^\/+|\/+$/g,"");
+    return (folder?folder+"/":"")+data.date;
+  }
+  function buildObsidianUrl(){
+    const md=buildMd();
+    const v=settings.vault?("&vault="+encodeURIComponent(settings.vault)):"";
+    return "obsidian://new?file="+encodeURIComponent(obsidianFilePath())+"&overwrite=true"+v+"&content="+encodeURIComponent(md);
+  }
+  function updateVaultHint(){
+    const el=$("vaultHint"); if(!el) return;
+    el.textContent="→ "+(settings.vault?settings.vault+"/":"（既定Vault）/")+obsidianFilePath()+".md";
+  }
+  function toObsidian(){
+    const url=buildObsidianUrl();
+    if(url.length>7500){ toast("内容が大きいため『.md 保存』か『共有』をご利用ください"); return; }
+    if(isEmbedded()){ obsidianModal(url,true); return; }         // embedded viewer blocks external apps
+    let left=false; const mark=()=>{left=true;};
+    window.addEventListener("blur",mark,{once:true});
+    document.addEventListener("visibilitychange",mark,{once:true});
+    try{ window.location.href=url; }catch(e){}
+    setTimeout(()=>{
+      window.removeEventListener("blur",mark);
+      document.removeEventListener("visibilitychange",mark);
+      if(!left) obsidianModal(url,false);                        // handler didn't fire (no Obsidian / blocked)
+    },1500);
+  }
+  function obsidianModal(url, embedded){
+    closeModal();
+    const reason = embedded
+      ? "この画面は claude.ai 内に<b>埋め込み表示</b>されているため、ブラウザがObsidianの起動をブロックしています。"
+      : "この端末で <code>obsidian://</code> を開けませんでした（Obsidian未インストール、またはブラウザにブロックされた可能性）。";
+    const steps = embedded
+      ? "対策：アプリを<b>単独で開く</b>（「ホーム画面に追加」したアイコン、またはブラウザの独立タブ）とObsidianへ直接渡せます。"
+      : "対策：この端末に<b>Obsidian</b>があるか、下の<b>Vault名</b>（例：外部脳）が正しいかご確認ください。";
+    const wrap=document.createElement("div"); wrap.className="modal"; wrap.id="obsModal";
+    wrap.innerHTML=
+      '<div class="modal-card" role="dialog" aria-modal="true">'+
+        '<h2>Obsidianに書き出し</h2>'+
+        '<p>'+reason+'</p><p>'+steps+'</p>'+
+        '<div class="modal-row">'+
+          '<a class="btn-primary" id="obsOpen" href="'+url.replace(/"/g,"&quot;")+'" target="_top" rel="noopener">Obsidianを開く</a>'+
+          '<button class="btn-ghost" id="obsCopy">Markdownをコピー</button>'+
+        '</div>'+
+        '<p class="modal-note">うまく渡らない時も、コピーしてObsidianの今日のノートに貼り付ければ確実です（今日のノートを上書き更新する仕様）。</p>'+
+        '<button class="btn-ghost modal-close" id="obsClose">閉じる</button>'+
+      '</div>';
+    document.body.appendChild(wrap);
+    document.getElementById("obsCopy").addEventListener("click",copyMd);
+    document.getElementById("obsOpen").addEventListener("click",()=>setTimeout(closeModal,600));
+    document.getElementById("obsClose").addEventListener("click",closeModal);
+    wrap.addEventListener("click",e=>{ if(e.target===wrap) closeModal(); });
+  }
+  function closeModal(){ const m=document.getElementById("obsModal"); if(m) m.remove(); }
+  function clearDay(){ if(!confirm(data.date+" の記録をこの端末から消去しますか？")) return; data={date:todayStr(),entries:[]}; saveData(); render(); toast("消去しました"); }
+
+  // ---------- voice ----------
+  let recog=null, recognizing=false;
+  function toggleMic(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){ $("memo").focus(); toast("キーボードのマイク（🎤）で音声入力できます"); return; }
+    if(recognizing){ try{recog.stop();}catch(e){} return; }
+    recog=new SR(); recog.lang="ja-JP"; recog.interimResults=true; recog.continuous=true;
+    let base=$("memo").value;
+    recog.onresult=ev=>{ let fin="",itm=""; for(let i=ev.resultIndex;i<ev.results.length;i++){ const r=ev.results[i]; if(r.isFinal)fin+=r[0].transcript; else itm+=r[0].transcript; } $("memo").value=(base+fin+itm); };
+    recog.onend=()=>{ recognizing=false; $("micBtn").classList.remove("rec"); base=$("memo").value; };
+    recog.onerror=()=>{ recognizing=false; $("micBtn").classList.remove("rec"); toast("音声認識を利用できません。キーボードのマイクをお試しください"); };
+    try{ recog.start(); recognizing=true; $("micBtn").classList.add("rec"); toast("音声入力中…"); }catch(e){ $("memo").focus(); }
+  }
+
+  // ---------- presets / tabs ----------
+  function setupChips(){
+    $("focusChips").addEventListener("click",e=>{ const b=e.target.closest(".chip"); if(!b)return; [...$("focusChips").children].forEach(c=>c.setAttribute("aria-pressed", c===b?"true":"false")); settings.focus=+b.dataset.min; saveSettings(); if(timer.mode==="focus"&&!timer.running){ setMode("focus"); saveTimer(); } render(); });
+    $("breakChips").addEventListener("click",e=>{ const b=e.target.closest(".chip"); if(!b)return; [...$("breakChips").children].forEach(c=>c.setAttribute("aria-pressed", c===b?"true":"false")); settings.break=+b.dataset.min; saveSettings(); if(timer.mode==="break"&&!timer.running){ setMode("break"); saveTimer(); } render(); });
+  }
+  function syncChips(){ [...$("focusChips").children].forEach(c=>c.setAttribute("aria-pressed", +c.dataset.min===settings.focus?"true":"false")); [...$("breakChips").children].forEach(c=>c.setAttribute("aria-pressed", +c.dataset.min===settings.break?"true":"false")); }
+  function setupTabs(){
+    $("tabLog").addEventListener("click",()=>{ $("tabLog").setAttribute("aria-selected","true"); $("tabMd").setAttribute("aria-selected","false"); $("logView").classList.remove("hidden"); $("md").classList.add("hidden"); });
+    $("tabMd").addEventListener("click",()=>{ $("tabMd").setAttribute("aria-selected","true"); $("tabLog").setAttribute("aria-selected","false"); $("md").classList.remove("hidden"); $("logView").classList.add("hidden"); renderMd(); });
+  }
+
+  // ---------- init ----------
+  function init(){
+    loadSettings(); loadData(); loadTimer();
+    if(!settings.vault) settings.vault="外部脳";                 // default target vault
+    if(settings.folder===undefined||settings.folder===null) settings.folder="集中ログ";
+    // day rollover: if stored timer belongs to old logic, keep; data already per-day
+    if(!timer.duration) timer.duration=settings.focus*60;
+    // if timer was running and end passed while app closed, finalize
+    if(timer.running && timer.endTime && Date.now()>=timer.endTime){ // finalize missed completion
+      complete();
+    }
+    $("vaultName").value=settings.vault||"";
+    $("folderName").value=settings.folder||"";
+    updateVaultHint();
+    syncChips();
+    setupChips(); setupTabs();
+    $("startBtn").addEventListener("click",startOrPause);
+    $("stopBtn").addEventListener("click",stopReset);
+    $("recBtn").addEventListener("click",record);
+    $("micBtn").addEventListener("click",toggleMic);
+    $("memo").addEventListener("keydown",e=>{
+      // Enter=記録／Shift+Enter=改行。日本語IMEの変換確定Enterは無視(isComposing / keyCode 229)
+      if(e.key==="Enter" && !e.shiftKey && !e.isComposing && e.keyCode!==229){ e.preventDefault(); record(); }
+    });
+    $("memo").addEventListener("input",scheduleDraftSave);
+    $("taskName").addEventListener("input",()=>{ if(!timer.running){ timer.task=$("taskName").value; } scheduleDraftSave(); });
+    $("copyBtn").addEventListener("click",copyMd);
+    $("dlBtn").addEventListener("click",download);
+    $("shareBtn").addEventListener("click",share);
+    $("clearBtn").addEventListener("click",clearDay);
+    $("obsBtn").addEventListener("click",toObsidian);
+    $("doneNext").addEventListener("click",doneNext);
+    $("doneClose").addEventListener("click",()=>{ hideDone(); setMode("focus"); saveTimer(); render(); });
+    $("vaultName").addEventListener("input",()=>{ settings.vault=$("vaultName").value.trim(); saveSettings(); updateVaultHint(); });
+    $("folderName").addEventListener("input",()=>{ settings.folder=$("folderName").value.trim(); saveSettings(); updateVaultHint(); });
+    document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ if(timer.running&&Date.now()>=timer.endTime){ complete(); } else render(); } else { flushDraft(); } });
+    window.addEventListener("pagehide",flushDraft);
+    window.addEventListener("beforeunload",flushDraft);
+    if(timer.running) startTick();
+    render();
+    // 入力途中メモの自動保存/復元（iOS Vivaldi等がBG復帰で再読込しても消えないように）
+    // ＋ 永続化リクエスト：対応環境ではストレージ自動削除の対象外にする（ホーム画面追加が最も確実）
+    (async()=>{ try{ if(navigator.storage&&navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){} try{ db=await idbOpen(); }catch(e){ db=null; } await restoreDraft(); })();
+  }
+  init();
+})();
+</script>
+
+</body>
+</html>
