@@ -538,7 +538,32 @@
     }
   }
   function copyMd(){ return copyToClipboard(buildMd(),"Markdownをコピーしました"); }
-  function download(){ const md=buildMd(); const blob=new Blob([md],{type:"text/markdown"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=data.date+".md"; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(()=>URL.revokeObjectURL(url),1500); toast("保存しました"); }
+  async function download(){
+    const md=buildMd();
+    const fname=data.date+".md";
+    if(typeof window.showSaveFilePicker==="function"){
+      try{
+        const fh=await window.showSaveFilePicker({
+          suggestedName:fname,
+          types:[{description:"Markdown", accept:{"text/markdown":[".md"]}}],
+        });
+        const w=await fh.createWritable();
+        await w.write(md);
+        await w.close();
+        toast("保存しました: "+fh.name);
+        return;
+      }catch(e){
+        if(e && e.name==="AbortError") return;
+      }
+    }
+    const blob=new Blob([md],{type:"text/markdown"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=fname;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    toast("保存しました");
+  }
   async function share(){ const md=buildMd(); if(navigator.share){ try{ await navigator.share({title:data.date, text:md}); }catch(e){} } else { copyMd(); toast("共有非対応のためコピーしました"); } }
   function isEmbedded(){ try{ return window.self!==window.top; }catch(e){ return true; } }
   function obsidianFilePath(){
@@ -654,14 +679,15 @@
     if(!fsSupported()){ toast("この端末はフォルダ保存に非対応です"); return false; }
     try{
       const h=await window.showDirectoryPicker({mode:"readwrite", id:"focusdesk-md"});
-      dirHandle=h; if(db){ try{ await idbSet("folderHandle",h); }catch(e){} }
+      dirHandle=h;
       updateFolderUI(); toast("保存先フォルダを設定: "+h.name); return true;
     }catch(e){ return false; }  // ユーザーがキャンセル
   }
   async function saveToFolder(){
     if(!fsSupported()){ toast("この機能はPCのChrome/Edgeのみ対応です"); return; }
     try{
-      if(!dirHandle){ if(!(await pickFolder())) return; }
+      dirHandle=null;
+      if(!(await pickFolder())) return;
       if(!(await verifyPerm(dirHandle))){ toast("フォルダへの書き込み許可が必要です"); return; }
       const fname=data.date+".md";
       const fh=await dirHandle.getFileHandle(fname,{create:true});
@@ -673,8 +699,8 @@
     const btn=$("fsBtn"), hint=$("fsHint"); if(!btn||!hint) return;
     if(!fsSupported()){ btn.style.display="none"; hint.textContent="※「フォルダに.md保存」はPCのChrome/Edgeのみ対応（iPhoneは非対応）"; return; }
     btn.style.display="";
-    if(dirHandle){ hint.innerHTML='保存先: <b>'+esc(dirHandle.name)+'</b> ／ <a href="#" id="fsChange">変更</a>'; }
-    else { hint.innerHTML='保存先フォルダ未設定（初回タップで選択→以後ワンクリック保存）'; }
+    if(dirHandle){ hint.innerHTML='前回の保存先: <b>'+esc(dirHandle.name)+'</b>（保存時に毎回選択します）'; }
+    else { hint.innerHTML='保存時に毎回フォルダを選択します'; }
     const ch=$("fsChange"); if(ch) ch.addEventListener("click",e=>{ e.preventDefault(); pickFolder(); });
   }
 
@@ -752,7 +778,7 @@
     // 入力途中メモの自動保存/復元（iOS Vivaldi等がBG復帰で再読込しても消えないように）
     // ＋ 永続化リクエスト：対応環境ではストレージ自動削除の対象外にする（ホーム画面追加が最も確実）
     updateFolderUI();
-    (async()=>{ try{ if(navigator.storage&&navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){} try{ db=await idbOpen(); }catch(e){ db=null; } try{ if(db){ const h=await idbGet("folderHandle"); if(h) dirHandle=h; } }catch(e){} updateFolderUI(); await restoreDraft(); })();
+    (async()=>{ try{ if(navigator.storage&&navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){} try{ db=await idbOpen(); }catch(e){ db=null; } updateFolderUI(); await restoreDraft(); })();
   }
   init();
 })();
