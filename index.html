@@ -132,6 +132,19 @@
   .savestate.saving{color:var(--focus-ink)}
   .savestate.saved{color:var(--good)}
   .savestate.error{color:#d5492f}
+  .cloudbar{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 12px; padding:10px 11px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:12px}
+  .cloudstate{display:flex; align-items:center; gap:7px; flex:1 1 190px; min-width:0; font-size:.76rem; color:var(--muted)}
+  .cloudstate span:last-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .clouddot{width:8px; height:8px; border-radius:50%; background:var(--muted); flex:0 0 auto}
+  .clouddot.online{background:var(--good); box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 18%,transparent)}
+  .clouddot.working{background:var(--focus)}
+  .clouddot.error{background:#d5492f}
+  .cloudauth{display:flex; gap:6px; flex:1 1 260px; justify-content:flex-end}
+  .cloudauth input{min-width:0; flex:1; font:inherit; font-size:.82rem; color:var(--ink); background:var(--surface);
+    border:1px solid var(--line); border-radius:9px; padding:7px 9px}
+  .cloudbtn{background:var(--surface); color:var(--ink-soft); border:1px solid var(--line); border-radius:9px; padding:7px 10px;
+    font-size:.78rem; font-weight:700; white-space:nowrap}
   textarea#memo{width:100%; min-height:120px; resize:vertical; font:inherit; font-size:1rem; color:var(--ink);
     background:var(--surface-2); border:1px solid var(--line); border-radius:13px; padding:13px 14px}
   textarea#memo::placeholder{color:var(--muted)}
@@ -288,6 +301,14 @@
           <h2>即時メモ</h2>
           <span class="savestate" id="saveState"></span>
         </div>
+        <div class="cloudbar" id="cloudBar">
+          <div class="cloudstate"><span class="clouddot" id="cloudDot"></span><span id="cloudStatus">クラウド同期を確認中…</span></div>
+          <div class="cloudauth" id="cloudAuth">
+            <input id="cloudEmail" type="email" inputmode="email" autocomplete="email" placeholder="メールアドレス" aria-label="同期用メールアドレス" />
+            <button class="cloudbtn" id="cloudLogin">ログイン</button>
+            <button class="cloudbtn hidden" id="cloudLogout">ログアウト</button>
+          </div>
+        </div>
         <textarea id="memo" rows="2" placeholder="思いついたことを一言。Enterで記録・Shift+Enterで改行。入力は自動保存されます。"></textarea>
         <div class="memoctrls">
           <button class="btn-mic" id="micBtn" title="音声入力" aria-label="音声入力">🎤</button>
@@ -321,11 +342,13 @@
         <div class="vaulthint" id="vaultHint">→ 外部脳/集中ログ/2026-08-01.md</div>
       </section>
     </div>
-    <div class="foot">ローカル保存（この端末のブラウザ内）。通知は前面表示時に音＋バナーで確実に鳴ります。</div>
+    <div class="foot">ログイン中はクラウド同期、未ログイン時もこの端末に保存されます。通知は前面表示時に音＋バナーで確実に鳴ります。</div>
   </div>
   <div class="toast" id="toast"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="./supabase-config.js"></script>
 <script>
 (function(){
   "use strict";
@@ -333,7 +356,7 @@
   const pad=n=>String(n).padStart(2,"0");
   const todayStr=()=>{const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());};
   const hhmm=ts=>{const d=new Date(ts);return pad(d.getHours())+":"+pad(d.getMinutes());};
-  const KEY_DATA="focusdesk:v1:", KEY_SET="focusdesk:settings", KEY_TIMER="focusdesk:timer", KEY_DRAFT="focusdesk:draft";
+  const KEY_DATA="focusdesk:v1:", KEY_SET="focusdesk:settings", KEY_TIMER="focusdesk:timer", KEY_DRAFT="focusdesk:draft", KEY_CLOUD_CACHE="focusdesk:cloud-cache:";
 
   let settings={focus:25,break:5,vault:"外部脳",folder:"集中ログ"};
   let day=todayStr();
@@ -341,14 +364,191 @@
   let timer={mode:"focus", running:false, endTime:0, duration:25*60, task:"", startTs:0, intr:0, remainingWhenPaused:0};
   let audioCtx=null, tickHandle=null;
   let db=null, draftSaveTimer=null, dirHandle=null, syncFileHandle=null, syncTimer=null, syncBusy=false, syncPending=false;
+  let cloudClient=null, cloudUser=null, cloudChannel=null, cloudCache=new Map(), cloudSyncTimer=null, cloudPullTimer=null, cloudSyncBusy=false, cloudSyncPending=false;
 
   // ---------- storage ----------
   function loadSettings(){ try{const s=JSON.parse(localStorage.getItem(KEY_SET)); if(s)settings=Object.assign(settings,s);}catch(e){} }
   function saveSettings(){ localStorage.setItem(KEY_SET, JSON.stringify(settings)); }
   function loadData(){ day=todayStr(); try{const d=JSON.parse(localStorage.getItem(KEY_DATA+day)); if(d&&d.entries)data=d; else data={date:day,entries:[]};}catch(e){data={date:day,entries:[]};} data.entries.forEach(e=>{ if(!e.id)e.id=uid(); }); }
-  function saveData(){ data.entries.sort(byTime); localStorage.setItem(KEY_DATA+data.date, JSON.stringify(data)); scheduleFileSync(); }
+  function saveData(){ data.entries.sort(byTime); localStorage.setItem(KEY_DATA+data.date, JSON.stringify(data)); scheduleFileSync(); scheduleCloudSync(); }
   function loadTimer(){ try{const t=JSON.parse(localStorage.getItem(KEY_TIMER)); if(t)timer=Object.assign(timer,t);}catch(e){} }
   function saveTimer(){ localStorage.setItem(KEY_TIMER, JSON.stringify(timer)); }
+
+  // ---------- private cloud sync (Supabase Auth + Realtime) ----------
+  function cloudConfigured(){
+    const c=window.FOCUS_DESK_CLOUD||{};
+    try{ return new URL(c.url).protocol==="https:" && !!c.publishableKey; }catch(e){ return false; }
+  }
+  function cloneEntry(entry){ return JSON.parse(JSON.stringify(entry)); }
+  function setCloudState(kind,text){
+    const dot=$("cloudDot"), label=$("cloudStatus");
+    if(dot) dot.className="clouddot"+(kind?(" "+kind):"");
+    if(label) label.textContent=text;
+  }
+  function cloudCacheKey(){ return cloudUser ? KEY_CLOUD_CACHE+cloudUser.id+":"+data.date : ""; }
+  function entryJson(entry){ return JSON.stringify(entry); }
+  function readCloudCache(){
+    cloudCache=new Map();
+    if(!cloudUser) return;
+    try{
+      const rows=JSON.parse(localStorage.getItem(cloudCacheKey())||"[]");
+      for(const row of rows) cloudCache.set(row.id,row);
+    }catch(e){}
+  }
+  function writeCloudCache(){
+    if(!cloudUser) return;
+    try{ localStorage.setItem(cloudCacheKey(),JSON.stringify([...cloudCache.values()])); }catch(e){}
+  }
+  function updateCloudAuthUI(){
+    const signed=!!cloudUser;
+    $("cloudEmail").classList.toggle("hidden",signed);
+    $("cloudLogin").classList.toggle("hidden",signed);
+    $("cloudLogout").classList.toggle("hidden",!signed);
+    if(signed) setCloudState("online","同期中 · "+(cloudUser.email||"ログイン済み"));
+    else if(cloudConfigured()) setCloudState("","ログインすると全端末で同期します");
+  }
+  function scheduleCloudSync(){
+    if(!cloudClient||!cloudUser) return;
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer=setTimeout(cloudSyncNow,450);
+  }
+  function scheduleCloudPull(){
+    if(!cloudClient||!cloudUser) return;
+    clearTimeout(cloudPullTimer);
+    cloudPullTimer=setTimeout(()=>pullCloudDay(false),250);
+  }
+  async function cloudSyncNow(){
+    if(!cloudClient||!cloudUser) return;
+    if(cloudSyncBusy){ cloudSyncPending=true; return; }
+    cloudSyncBusy=true; setCloudState("working","同期しています…");
+    try{
+      const current=new Map(data.entries.map(e=>[e.id,e]));
+      const rows=[];
+      for(const entry of current.values()){
+        const cached=cloudCache.get(entry.id);
+        if(!cached||cached.deleted||entryJson(cached.payload)!==entryJson(entry)){
+          rows.push({user_id:cloudUser.id,id:entry.id,day:data.date,payload:entry,deleted:false});
+        }
+      }
+      for(const cached of cloudCache.values()){
+        if(!cached.deleted&&!current.has(cached.id)) rows.push({user_id:cloudUser.id,id:cached.id,day:data.date,payload:cached.payload||{},deleted:true});
+      }
+      if(rows.length){
+        const result=await cloudClient.from("focus_entries").upsert(rows,{onConflict:"user_id,id"});
+        if(result.error) throw result.error;
+        for(const row of rows) cloudCache.set(row.id,{id:row.id,day:row.day,payload:cloneEntry(row.payload),deleted:row.deleted});
+        writeCloudCache();
+      }
+      setCloudState("online","同期済み · "+(cloudUser.email||"ログイン済み"));
+    }catch(e){
+      setCloudState("error","同期エラー（端末内には保存済み）");
+      console.error("Cloud sync failed",e);
+    }finally{
+      cloudSyncBusy=false;
+      if(cloudSyncPending){ cloudSyncPending=false; scheduleCloudSync(); }
+    }
+  }
+  async function pullCloudDay(showToast){
+    if(!cloudClient||!cloudUser) return;
+    setCloudState("working","クラウドから更新中…");
+    try{
+      const result=await cloudClient.from("focus_entries").select("id,day,payload,deleted,updated_at").eq("day",data.date);
+      if(result.error) throw result.error;
+      const remote=new Map((result.data||[]).map(row=>[row.id,row]));
+      const previous=cloudCache;
+      const local=new Map(data.entries.map(e=>[e.id,e]));
+      const merged=[];
+      const kept=new Set();
+      let hasLocalChanges=false;
+      for(const entry of local.values()){
+        const old=previous.get(entry.id), fresh=remote.get(entry.id);
+        const dirty=!old||old.deleted||entryJson(old.payload)!==entryJson(entry);
+        if(dirty){ merged.push(entry); kept.add(entry.id); hasLocalChanges=true; }
+        else if(fresh&&!fresh.deleted){ merged.push(cloneEntry(fresh.payload)); kept.add(entry.id); }
+      }
+      for(const row of remote.values()){
+        if(!row.deleted&&!kept.has(row.id)){ merged.push(cloneEntry(row.payload)); kept.add(row.id); }
+      }
+      data.entries=merged.sort(byTime);
+      localStorage.setItem(KEY_DATA+data.date,JSON.stringify(data));
+      cloudCache=remote; writeCloudCache(); render();
+      setCloudState("online","同期済み · "+(cloudUser.email||"ログイン済み"));
+      if(showToast) toast("クラウドの記録を同期しました");
+      if(hasLocalChanges) scheduleCloudSync();
+    }catch(e){
+      setCloudState("error","クラウドを読み込めません");
+      console.error("Cloud pull failed",e);
+    }
+  }
+  async function subscribeCloud(){
+    if(cloudChannel){ await cloudClient.removeChannel(cloudChannel); cloudChannel=null; }
+    if(!cloudUser) return;
+    cloudChannel=cloudClient.channel("focus-desk-"+cloudUser.id)
+      .on("postgres_changes",{event:"*",schema:"public",table:"focus_entries",filter:"user_id=eq."+cloudUser.id},scheduleCloudPull)
+      .on("postgres_changes",{event:"*",schema:"public",table:"focus_drafts",filter:"user_id=eq."+cloudUser.id},()=>pullCloudDraft(false))
+      .subscribe();
+  }
+  async function applyCloudSession(session){
+    const next=session&&session.user?session.user:null;
+    if((cloudUser&&cloudUser.id)===(next&&next.id)) return;
+    cloudUser=next; updateCloudAuthUI();
+    if(!cloudUser){ cloudCache=new Map(); if(cloudChannel){ await cloudClient.removeChannel(cloudChannel); cloudChannel=null; } return; }
+    readCloudCache(); await pullCloudDay(true); await pullCloudDraft(true); await subscribeCloud();
+  }
+  async function sendLoginLink(){
+    if(!cloudClient){ toast("クラウド同期が未設定です"); return; }
+    const email=$("cloudEmail").value.trim();
+    if(!/^\S+@\S+\.\S+$/.test(email)){ toast("メールアドレスを入力してください"); return; }
+    setCloudState("working","ログインメールを送信中…");
+    const result=await cloudClient.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
+    if(result.error){ setCloudState("error","ログインメールを送れませんでした"); toast(result.error.message); return; }
+    setCloudState("","メールのリンクを開いてください"); toast("ログイン用メールを送信しました");
+  }
+  async function signOutCloud(){
+    if(!cloudClient) return;
+    await cloudClient.auth.signOut();
+    await applyCloudSession(null); updateCloudAuthUI(); toast("ログアウトしました");
+  }
+  async function initCloud(){
+    if(!cloudConfigured()){
+      setCloudState("","クラウド同期は未設定です");
+      $("cloudEmail").classList.add("hidden"); $("cloudLogin").classList.add("hidden");
+      return;
+    }
+    if(!window.supabase||!window.supabase.createClient){ setCloudState("error","同期ライブラリを読み込めません"); return; }
+    const c=window.FOCUS_DESK_CLOUD;
+    cloudClient=window.supabase.createClient(c.url,c.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+    const current=await cloudClient.auth.getSession();
+    if(current.error){ setCloudState("error","ログイン状態を確認できません"); return; }
+    await applyCloudSession(current.data.session);
+    cloudClient.auth.onAuthStateChange((_event,session)=>setTimeout(()=>applyCloudSession(session),0));
+    updateCloudAuthUI();
+  }
+
+  async function saveCloudDraft(d){
+    if(!cloudClient||!cloudUser) return;
+    const result=await cloudClient.from("focus_drafts").upsert({user_id:cloudUser.id,day:d.date,memo:d.memo,task:d.task},{onConflict:"user_id,day"});
+    if(result.error){ setCloudState("error","下書きのクラウド保存に失敗"); console.error(result.error); }
+  }
+  async function pullCloudDraft(showToast){
+    if(!cloudClient||!cloudUser) return;
+    const result=await cloudClient.from("focus_drafts").select("memo,task,updated_at").eq("day",todayStr()).maybeSingle();
+    if(result.error){ console.error(result.error); return; }
+    const remote=result.data;
+    const local=await loadDraft();
+    if(!remote){ if(local&&(local.memo||local.task)) saveCloudDraft(local); return; }
+    const remoteAt=Date.parse(remote.updated_at)||0, localAt=(local&&local.at)||0;
+    if(remoteAt>localAt){
+      if(document.activeElement===$("memo")||document.activeElement===$("taskName")) return;
+      $("memo").value=remote.memo||"";
+      if(!timer.running){ $("taskName").value=remote.task||""; timer.task=remote.task||""; }
+      const d={date:todayStr(),memo:remote.memo||"",task:remote.task||"",at:remoteAt};
+      try{ localStorage.setItem(KEY_DRAFT,JSON.stringify(d)); }catch(e){}
+      if(db) idbSet("draft",d).catch(()=>{});
+      setSaveState(d.memo?"saved":"idle");
+      if(showToast&&(d.memo||d.task)) toast("クラウドの入力途中データを復元しました");
+    }else if(localAt>remoteAt){ saveCloudDraft(local); }
+  }
 
   // ---------- draft auto-save: IndexedDB (500ms debounce) + localStorage mirror ----------
   const DB_NAME="focusdesk", DB_STORE="kv";
@@ -361,6 +561,7 @@
     try{ localStorage.setItem(KEY_DRAFT, JSON.stringify(d)); }catch(e){}   // 同期ミラー：pagehide時も確実
     if(db){ idbSet("draft",d).then(()=>setSaveState(d.memo?"saved":"idle")).catch(()=>setSaveState(d.memo?"saved":"idle")); }
     else setSaveState(d.memo?"saved":"idle");
+    saveCloudDraft(d);
   }
   function scheduleDraftSave(){ setSaveState("saving"); clearTimeout(draftSaveTimer); draftSaveTimer=setTimeout(saveDraftNow,500); }
   function flushDraft(){ clearTimeout(draftSaveTimer); saveDraftNow(); }
@@ -893,6 +1094,8 @@
     });
     $("memo").addEventListener("input",scheduleDraftSave);
     $("taskName").addEventListener("input",()=>{ if(!timer.running){ timer.task=$("taskName").value; } scheduleDraftSave(); });
+    $("memo").addEventListener("blur",()=>pullCloudDraft(false));
+    $("taskName").addEventListener("blur",()=>pullCloudDraft(false));
     $("copyBtn").addEventListener("click",copyMd);
     $("dlBtn").addEventListener("click",download);
     $("loadBtn").addEventListener("click",loadMd);
@@ -904,7 +1107,10 @@
     $("doneClose").addEventListener("click",()=>{ hideDone(); setMode("focus"); saveTimer(); render(); });
     $("vaultName").addEventListener("input",()=>{ settings.vault=$("vaultName").value.trim(); saveSettings(); updateVaultHint(); });
     $("folderName").addEventListener("input",()=>{ settings.folder=$("folderName").value.trim(); saveSettings(); updateVaultHint(); });
-    document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ if(timer.running&&Date.now()>=timer.endTime){ complete(); } else render(); } else { flushDraft(); } });
+    $("cloudLogin").addEventListener("click",sendLoginLink);
+    $("cloudEmail").addEventListener("keydown",e=>{ if(e.key==="Enter") sendLoginLink(); });
+    $("cloudLogout").addEventListener("click",signOutCloud);
+    document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ if(timer.running&&Date.now()>=timer.endTime){ complete(); } else render(); scheduleCloudPull(); pullCloudDraft(false); } else { flushDraft(); } });
     window.addEventListener("pagehide",flushDraft);
     window.addEventListener("beforeunload",flushDraft);
     if(timer.running) startTick();
@@ -912,7 +1118,7 @@
     // 入力途中メモの自動保存/復元（iOS Vivaldi等がBG復帰で再読込しても消えないように）
     // ＋ 永続化リクエスト：対応環境ではストレージ自動削除の対象外にする（ホーム画面追加が最も確実）
     updateFolderUI(); updateSyncHint();
-    (async()=>{ try{ if(navigator.storage&&navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){} try{ db=await idbOpen(); }catch(e){ db=null; } try{ if(db){ const h=await idbGet("syncFileHandle"); if(h){ syncFileHandle=h; updateSyncHint("自動同期先を復元: "+h.name); } } }catch(e){} updateFolderUI(); await restoreDraft(); })();
+    (async()=>{ try{ if(navigator.storage&&navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){} try{ db=await idbOpen(); }catch(e){ db=null; } try{ if(db){ const h=await idbGet("syncFileHandle"); if(h){ syncFileHandle=h; updateSyncHint("自動同期先を復元: "+h.name); } } }catch(e){} updateFolderUI(); await restoreDraft(); await initCloud(); })();
   }
   init();
 })();
