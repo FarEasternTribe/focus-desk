@@ -304,11 +304,13 @@
         <div class="exports">
           <button class="btn-ghost" id="copyBtn">コピー</button>
           <button class="btn-ghost" id="dlBtn">.md 保存</button>
+          <button class="btn-ghost" id="loadBtn">.md 同期</button>
           <button class="btn-ghost" id="shareBtn">共有…</button>
           <button class="btn-ghost" id="clearBtn">今日を消去</button>
           <button class="btn-ghost wide" id="obsBtn">Obsidianに書き出し（今日のノートを更新）</button>
           <button class="btn-ghost wide" id="fsBtn">OneDriveフォルダに保存（.md）</button>
         </div>
+        <div class="vaulthint" id="syncHint">同期ファイル未設定（.md 同期で選択）</div>
         <div class="vaulthint" id="fsHint"></div>
         <div class="vaultrow">
           <label for="vaultName">Vault</label>
@@ -338,13 +340,13 @@
   let data={date:day, entries:[]};              // entries: {t:'memo',at,text} | {t:'session',start,end,minutes,task,intr}
   let timer={mode:"focus", running:false, endTime:0, duration:25*60, task:"", startTs:0, intr:0, remainingWhenPaused:0};
   let audioCtx=null, tickHandle=null;
-  let db=null, draftSaveTimer=null, dirHandle=null;
+  let db=null, draftSaveTimer=null, dirHandle=null, syncFileHandle=null, syncTimer=null, syncBusy=false, syncPending=false;
 
   // ---------- storage ----------
   function loadSettings(){ try{const s=JSON.parse(localStorage.getItem(KEY_SET)); if(s)settings=Object.assign(settings,s);}catch(e){} }
   function saveSettings(){ localStorage.setItem(KEY_SET, JSON.stringify(settings)); }
   function loadData(){ day=todayStr(); try{const d=JSON.parse(localStorage.getItem(KEY_DATA+day)); if(d&&d.entries)data=d; else data={date:day,entries:[]};}catch(e){data={date:day,entries:[]};} data.entries.forEach(e=>{ if(!e.id)e.id=uid(); }); }
-  function saveData(){ localStorage.setItem(KEY_DATA+data.date, JSON.stringify(data)); }
+  function saveData(){ data.entries.sort(byTime); localStorage.setItem(KEY_DATA+data.date, JSON.stringify(data)); scheduleFileSync(); }
   function loadTimer(){ try{const t=JSON.parse(localStorage.getItem(KEY_TIMER)); if(t)timer=Object.assign(timer,t);}catch(e){} }
   function saveTimer(){ localStorage.setItem(KEY_TIMER, JSON.stringify(timer)); }
 
@@ -420,7 +422,7 @@
     $("statMin").textContent=fs.reduce((a,e)=>a+e.minutes,0);
   }
   function renderSessions(){
-    const fs=data.entries.filter(e=>e.t==="session");
+    const fs=data.entries.filter(e=>e.t==="session").sort(byTime);
     const box=$("sessionList");
     if(!fs.length){ box.innerHTML='<div class="empty">まだありません。</div>'; return; }
     box.innerHTML=fs.map(e=>`<div class="srow"><span class="tm">${e.start}–${e.end}</span><span class="tk">${esc(e.task||"（無題）")}</span><span class="mn">${e.minutes}分${e.intr?` <span class="intr">中断${e.intr}</span>`:""}</span></div>`).join("");
@@ -454,6 +456,131 @@
       }
     }
     return lines.join("\n")+"\n";
+  }
+  function entryKey(e){
+    if(e.t==="memo") return ["memo", e.at, String(e.text||"").trim()].join("|");
+    return ["session", e.start, e.end, e.minutes, String(e.task||"").trim(), e.intr||0].join("|");
+  }
+  function parseMd(text){
+    const lines=String(text||"").replace(/\r\n?/g,"\n").split("\n");
+    let fileDate="";
+    const entries=[];
+    for(const raw of lines){
+      const line=raw.trim();
+      if(!line) continue;
+      const title=line.match(/^#\s*(\d{4}-\d{2}-\d{2})\s*$/);
+      if(title){ fileDate=title[1]; continue; }
+      const session=line.match(/^(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})\s+✓集中\s+(\d+)\s*分(?:[：:](.*?))?(?:（中断(\d+)）)?$/);
+      if(session){
+        entries.push({id:uid(), t:"session", start:session[1], end:session[2], minutes:+session[3], task:(session[4]||"").trim(), intr:+(session[5]||0)});
+        continue;
+      }
+      const memo=line.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
+      if(memo){
+        entries.push({id:uid(), t:"memo", at:memo[1], text:memo[2].trim()});
+      }
+    }
+    return {date:fileDate, entries};
+  }
+  function isStructuredMdInput(text, parsed){
+    const meaningful=String(text||"").replace(/\r\n?/g,"\n").split("\n")
+      .map(line=>line.trim())
+      .filter(line=>line && !/^#\s*\d{4}-\d{2}-\d{2}\s*$/.test(line));
+    return meaningful.length>0 && parsed.entries.length===meaningful.length;
+  }
+  function mergeImported(parsed){
+    if(!parsed.entries.length){ toast("読み込める記録がありません"); return; }
+    if(parsed.date && parsed.date!==data.date && !confirm(parsed.date+" のファイルです。今日 "+data.date+" の記録として読み込みますか？")) return;
+    const added=mergeEntries(parsed.entries);
+    saveData(); render();
+    toast(added?added+"件読み込みました":"追加する新しい記録はありません");
+  }
+  function mergeEntries(entries){
+    const seen=new Set(data.entries.map(entryKey));
+    let added=0;
+    for(const entry of entries){
+      const key=entryKey(entry);
+      if(seen.has(key)) continue;
+      seen.add(key);
+      data.entries.push(entry);
+      added++;
+    }
+    return added;
+  }
+  function updateSyncHint(text){
+    const el=$("syncHint"); if(!el) return;
+    el.textContent=text || (syncFileHandle ? ("自動同期中: "+syncFileHandle.name) : "同期ファイル未設定（.md 同期で選択）");
+  }
+  async function verifyFilePerm(handle,mode){
+    const opt={mode:mode||"readwrite"};
+    if((await handle.queryPermission(opt))==="granted") return true;
+    if((await handle.requestPermission(opt))==="granted") return true;
+    return false;
+  }
+  async function writeMergedToHandle(handle){
+    if(!handle) return false;
+    if(!(await verifyFilePerm(handle,"readwrite"))){ updateSyncHint("同期にはファイル書き込み許可が必要です"); return false; }
+    try{
+      const file=await handle.getFile();
+      const parsed=parseMd(await file.text());
+      if(parsed.date && parsed.date!==data.date && !confirm(parsed.date+" のファイルです。今日 "+data.date+" の記録を追記しますか？")) return false;
+      mergeEntries(parsed.entries);
+      localStorage.setItem(KEY_DATA+data.date, JSON.stringify(data));
+    }catch(e){}
+    const w=await handle.createWritable();
+    await w.write(buildMd());
+    await w.close();
+    render();
+    return true;
+  }
+  function scheduleFileSync(){
+    if(!syncFileHandle) return;
+    clearTimeout(syncTimer);
+    syncTimer=setTimeout(()=>autoSyncToFile(),700);
+  }
+  async function autoSyncToFile(){
+    if(!syncFileHandle) return;
+    if(syncBusy){ syncPending=true; return; }
+    syncBusy=true; syncPending=false;
+    try{
+      if(await writeMergedToHandle(syncFileHandle)){
+        updateSyncHint("自動同期済み: "+syncFileHandle.name+" "+hhmm(Date.now()));
+      }
+    }catch(e){
+      updateSyncHint("自動同期に失敗: "+((e&&e.message)||e));
+    }finally{
+      syncBusy=false;
+      if(syncPending) scheduleFileSync();
+    }
+  }
+  async function loadMd(){
+    try{
+      if(typeof window.showOpenFilePicker==="function"){
+        const handles=await window.showOpenFilePicker({
+          multiple:false,
+          types:[{description:"Markdown", accept:{"text/markdown":[".md"], "text/plain":[".md",".txt"]}}],
+        });
+        if(!handles || !handles[0]) return;
+        syncFileHandle=handles[0];
+        if(db){ try{ await idbSet("syncFileHandle",syncFileHandle); }catch(e){} }
+        const file=await syncFileHandle.getFile();
+        mergeImported(parseMd(await file.text()));
+        await autoSyncToFile();
+        updateSyncHint("自動同期中: "+syncFileHandle.name);
+        return;
+      }
+    }catch(e){
+      if(e && e.name==="AbortError") return;
+    }
+    const input=document.createElement("input");
+    input.type="file"; input.accept=".md,text/markdown,text/plain";
+    input.addEventListener("change",async()=>{
+      const file=input.files&&input.files[0];
+      if(!file) return;
+      mergeImported(parseMd(await file.text()));
+      updateSyncHint("読み込みのみ完了（このブラウザでは自動書き戻し不可）");
+    },{once:true});
+    input.click();
   }
   function renderMd(){ $("md").textContent=buildMd(); }
 
@@ -522,6 +649,14 @@
   function record(){
     const t=$("memo").value.trim();
     if(!t){ $("memo").focus(); return; }
+    const parsed=parseMd(t);
+    if(isStructuredMdInput(t, parsed)){
+      if(parsed.date && parsed.date!==data.date && !confirm(parsed.date+" のメモです。今日 "+data.date+" の記録として取り込みますか？")) return;
+      const added=mergeEntries(parsed.entries);
+      saveData(); $("memo").value=""; render(); toast(added?added+"件を時刻順に取り込みました":"追加する新しい記録はありません");
+      saveDraftNow();
+      return;
+    }
     data.entries.push({id:uid(), t:"memo", at:hhmm(Date.now()), text:t});
     saveData(); $("memo").value=""; render(); toast("記録しました");
     saveDraftNow();   // 記録後は下書きを空で保存し、再読込で消したメモが復活しないようにする
@@ -547,9 +682,7 @@
           suggestedName:fname,
           types:[{description:"Markdown", accept:{"text/markdown":[".md"]}}],
         });
-        const w=await fh.createWritable();
-        await w.write(md);
-        await w.close();
+        await writeMergedToHandle(fh);
         toast("保存しました: "+fh.name);
         return;
       }catch(e){
@@ -691,7 +824,7 @@
       if(!(await verifyPerm(dirHandle))){ toast("フォルダへの書き込み許可が必要です"); return; }
       const fname=data.date+".md";
       const fh=await dirHandle.getFileHandle(fname,{create:true});
-      const w=await fh.createWritable(); await w.write(buildMd()); await w.close();
+      await writeMergedToHandle(fh);
       toast("保存しました: "+dirHandle.name+"/"+fname);
     }catch(e){ toast("保存に失敗: "+((e&&e.message)||e)); }
   }
@@ -762,6 +895,7 @@
     $("taskName").addEventListener("input",()=>{ if(!timer.running){ timer.task=$("taskName").value; } scheduleDraftSave(); });
     $("copyBtn").addEventListener("click",copyMd);
     $("dlBtn").addEventListener("click",download);
+    $("loadBtn").addEventListener("click",loadMd);
     $("shareBtn").addEventListener("click",share);
     $("clearBtn").addEventListener("click",clearDay);
     $("obsBtn").addEventListener("click",toObsidian);
@@ -777,8 +911,8 @@
     render();
     // 入力途中メモの自動保存/復元（iOS Vivaldi等がBG復帰で再読込しても消えないように）
     // ＋ 永続化リクエスト：対応環境ではストレージ自動削除の対象外にする（ホーム画面追加が最も確実）
-    updateFolderUI();
-    (async()=>{ try{ if(navigator.storage&&navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){} try{ db=await idbOpen(); }catch(e){ db=null; } updateFolderUI(); await restoreDraft(); })();
+    updateFolderUI(); updateSyncHint();
+    (async()=>{ try{ if(navigator.storage&&navigator.storage.persist){ await navigator.storage.persist(); } }catch(e){} try{ db=await idbOpen(); }catch(e){ db=null; } try{ if(db){ const h=await idbGet("syncFileHandle"); if(h){ syncFileHandle=h; updateSyncHint("自動同期先を復元: "+h.name); } } }catch(e){} updateFolderUI(); await restoreDraft(); })();
   }
   init();
 })();
